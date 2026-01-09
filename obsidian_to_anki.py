@@ -14,15 +14,7 @@ import html
 import time
 import socket
 import subprocess
-import logging
 import hashlib
-
-logging.basicConfig(
-    filename='obsidian_to_anki_log.log',
-    level=logging.DEBUG,
-    format='%(asctime)s:::%(levelname)s:::%(funcName)s:::%(message)s'
-)
-logging.disable(logging.CRITICAL) # disable logging
 
 MEDIA = dict()
 
@@ -1084,7 +1076,6 @@ class File:
 
     def scan_file(self):
         """Sort notes from file into adding vs editing."""
-        logging.info("Scanning file " + self.filename + " for notes...")
         self.setup_frozen_fields_dict()
         self.setup_target_deck()
         self.setup_global_tags()
@@ -1260,7 +1251,6 @@ class RegexFile(File):
 
     def scan_file(self):
         """Sort notes from file into adding vs editing."""
-        logging.info("Scanning file" + self.filename + " for notes...")
         self.setup_frozen_fields_dict()
         self.setup_target_deck()
         self.setup_global_tags()
@@ -1431,9 +1421,7 @@ class Directory:
 
     def requests_1(self):
         """Get the 1st HTTP request for this directory."""
-        logging.info("Forming request 1 for directory" + self.path)
         requests = list()
-        logging.info("Adding notes into Anki...")
         requests.append(
             AnkiConnect.request(
                 "multi",
@@ -1443,7 +1431,6 @@ class Directory:
                 ]
             )
         )
-        logging.info("Getting card IDs of notes to be edited...")
         requests.append(
             AnkiConnect.request(
                 "multi",
@@ -1453,7 +1440,6 @@ class Directory:
                 ]
             )
         )
-        logging.info("Updating fields of existing notes...")
         requests.append(
             AnkiConnect.request(
                 "multi",
@@ -1463,7 +1449,6 @@ class Directory:
                 ]
             )
         )
-        logging.info("Removing empty notes...")
         requests.append(
             AnkiConnect.request(
                 "multi",
@@ -1502,9 +1487,7 @@ class Directory:
 
     def requests_2(self):
         """Get 2nd big request."""
-        logging.info("Forming request 2 for directory " + self.path)
         requests = list()
-        logging.info("Moving cards to target deck...")
         requests.append(
             AnkiConnect.request(
                 "multi",
@@ -1514,7 +1497,6 @@ class Directory:
                 ]
             )
         )
-        logging.info("Replacing tags...")
         requests.append(
             AnkiConnect.request(
                 "multi",
