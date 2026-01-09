@@ -16,18 +16,13 @@ import socket
 import subprocess
 import logging
 import hashlib
-try:
-    import gooey
-    GOOEY = True
-except ModuleNotFoundError:
-    print("Gooey not installed, switching to cli...")
-    GOOEY = False
 
 logging.basicConfig(
     filename='obsidian_to_anki_log.log',
     level=logging.DEBUG,
     format='%(asctime)s:::%(levelname)s:::%(funcName)s:::%(message)s'
 )
+logging.disable(logging.CRITICAL) # disable logging
 
 MEDIA = dict()
 
@@ -43,25 +38,12 @@ NOTE_DICT_TEMPLATE = {
         "allowDuplicate": False,
         "duplicateScope": "deck"
     },
-    "tags": ["Obsidian_to_Anki"],
+    "tags": ["obsidian-to-anki"],
     # ^So that you can see what was added automatically.
     "audio": list()
 }
 
-CONFIG_PATH = os.environ.get("OBSIDIAN_TO_ANKI_CONFIG_PATH") or os.path.expanduser(
-    os.path.join(
-        os.path.dirname(os.path.realpath(__file__)),
-        "obsidian_to_anki_config.ini"
-    )
-)
 CONFIG_DATA = dict()
-
-DATA_PATH = os.environ.get("OBSIDIAN_TO_ANKI_DATA_PATH") or os.path.expanduser(
-    os.path.join(
-        os.path.dirname(os.path.realpath(__file__)),
-        "obsidian_to_anki_data.json"
-    )
-)
 
 md_parser = markdown.Markdown(
     extensions=[
@@ -87,22 +69,6 @@ def has_clozes(text):
 def note_has_clozes(note):
     """Checks whether a note has cloze deletions in any of its fields."""
     return any(has_clozes(field) for field in note["fields"].values())
-
-
-def write_safe(filename, contents):
-    """
-    Write contents to filename while keeping a backup.
-
-    If write fails, a backup 'filename.bak' will still exist.
-    """
-    with open(filename + ".tmp", "w", encoding='utf_8') as temp:
-        temp.write(contents)
-    os.rename(filename, filename + ".bak")
-    os.rename(filename + ".tmp", filename)
-    with open(filename, encoding='utf_8') as f:
-        success = (f.read() == contents)
-    if success:
-        os.remove(filename + ".bak")
 
 
 def string_insert(string, position_inserts):
@@ -181,7 +147,7 @@ def wait_for_port(port, host='localhost', timeout=5.0):
 def load_anki():
     """Attempt to load anki in the correct profile."""
     try:
-        Config.load_config()
+        Config.init_config()
     except Exception as e:
         print("Error when loading config:", e)
         print("Please open Anki before running script again.")
@@ -212,8 +178,6 @@ def load_anki():
 
 def main():
     """Main functionality of script."""
-    if not os.path.exists(CONFIG_PATH):
-        Config.update_config()
     App()
 
 
@@ -730,7 +694,7 @@ class Config:
         config["DEFAULT"] = dict()  # Removes DEFAULT if it's there.
         config.setdefault("Defaults", dict())
         config["Defaults"].setdefault(
-            "Tag", "Obsidian_to_Anki"
+            "Tag", "obsidian-to-anki"
         )
         config["Defaults"].setdefault(
             "Deck", "Default"
@@ -754,23 +718,19 @@ class Config:
             "Anki Profile", ""
         )
 
-    def update_config():
+    def init_config():
         """Update config with new notes."""
-        print("Updating configuration file...")
         config = configparser.ConfigParser()
         config.optionxform = str
-        if os.path.exists(CONFIG_PATH):
-            print("Config file exists, reading...")
-            config.read(CONFIG_PATH, encoding='utf-8-sig')
         note_types = AnkiConnect.invoke("modelNames")
         config.setdefault("Custom Regexps", dict())
         for note in note_types:
             config["Custom Regexps"].setdefault(note, "")
         Config.setup_syntax(config)
         Config.setup_defaults(config)
-        with open(CONFIG_PATH, "w", encoding='utf_8') as configfile:
-            config.write(configfile)
-        print("Configuration file updated!")
+        Config.load_syntax(config)
+        Config.load_defaults(config)
+        CONFIG_DATA["CUSTOM_REGEXPS"] = config["Custom Regexps"]
 
     @staticmethod
     def load_syntax(config):
@@ -831,40 +791,6 @@ class Config:
             "Obsidian", "Add file link"
         )
 
-    def load_config():
-        """Load from an existing config file (assuming it exists)."""
-        print("Loading configuration file...")
-        config = configparser.ConfigParser()
-        config.optionxform = str  # Allows for case sensitivity
-        config.read(CONFIG_PATH, encoding='utf-8-sig')
-        Config.load_syntax(config)
-        Config.load_defaults(config)
-        CONFIG_DATA["CUSTOM_REGEXPS"] = config["Custom Regexps"]
-        print("Loaded successfully!")
-
-
-class Data:
-    """Class for managing the data file (not meant to be changed by users.)"""
-
-    def create_data_file():
-        """Creates the data file for the script."""
-        print("Creating data file...")
-        with open(DATA_PATH, "w") as f:
-            json.dump(dict(), f)
-
-    def update_data_file(data):
-        """Updates the data file for the script with the given data."""
-        print("Updating data file...")
-        with open(DATA_PATH, "w") as f:
-            json.dump(data, f)
-
-    def load_data_file():
-        """Loads the data file into memory"""
-        with open(DATA_PATH, "r") as f:
-            data = json.load(f)
-        App.ADDED_MEDIA = data.get("Added Media", list())
-        App.FILE_HASHES = data.get("File Hashes", dict())
-
 
 class App:
     """Master class that manages the application."""
@@ -873,46 +799,15 @@ class App:
 
     def __init__(self):
         """Execute the main functionality of the script."""
-        try:
-            Config.load_config()
-        except Exception as e:
-            print("Error:", e)
-            print("Attempting to fix config file...")
-            Config.update_config()
-            Config.load_config()
-        try:
-            Data.load_data_file()
-        except Exception as e:
-            print("Error:", e)
-            Data.create_data_file()
-            Data.load_data_file()
+        Config.init_config()
+        App.ADDED_MEDIA = []
+        App.FILE_HASHES = {}
         self.get_fields()
         self.get_ids()
-        if CONFIG_DATA["GUI"] and GOOEY:
-            self.setup_gui_parser()
-        else:
-            self.setup_cli_parser()
+        self.setup_cli_parser()
         args = self.parser.parse_args()
-        if CONFIG_DATA["GUI"] and GOOEY:
-            if args.directory:
-                args.path = args.directory
-            elif args.file:
-                args.path = args.file
-            else:
-                args.path = False
         no_args = True
-        if args.update:
-            no_args = False
-            Config.update_config()
-            Config.load_config()
-        if args.mediaupdate:
-            no_args = False
-            Data.create_data_file()
         self.gen_regexp()
-        if args.config:
-            no_args = False
-            webbrowser.open(CONFIG_PATH)
-            return
         if args.path:
             no_args = False
             current = os.getcwd()
@@ -952,16 +847,12 @@ class App:
                     )
                 ]
             requests = list()
-            print("Getting tag list")
             requests.append(
                 AnkiConnect.request(
                     "getTags"
                 )
             )
-            print("Adding media with these filenames...")
-            print(list(MEDIA.keys()))
             requests.append(self.get_add_media())
-            print("Adding directory requests...")
             for directory in directories:
                 requests.append(directory.requests_1())
             result = AnkiConnect.invoke(
@@ -984,29 +875,11 @@ class App:
             App.ADDED_MEDIA = list(App.ADDED_MEDIA)
             for directory in directories:
                 App.FILE_HASHES.update(directory.hashes())
-            Data.update_data_file(
-                {
-                    "Added Media": App.ADDED_MEDIA,
-                    "File Hashes": App.FILE_HASHES
-                }
-            )
         if no_args:
             self.parser.print_help()
 
     def setup_parser_optionals(self):
         """Set up optional arguments for the parser."""
-        self.parser.add_argument(
-            "-c", "--config",
-            action="store_true",
-            dest="config",
-            help="Open up config file for editing."
-        )
-        self.parser.add_argument(
-            "-u", "--update",
-            action="store_true",
-            dest="update",
-            help="Update config file."
-        )
         self.parser.add_argument(
             "-r", "--regex",
             action="store_true",
@@ -1015,41 +888,11 @@ class App:
             default=CONFIG_DATA["Regex"]
         )
         self.parser.add_argument(
-            "-m", "--mediaupdate",
-            action="store_true",
-            dest="mediaupdate",
-            help="Force addition of media files."
-        )
-        self.parser.add_argument(
             "-R", "--recurse",
             action="store_true",
             dest="recurse",
             help="Recursively scan subfolders."
         )
-
-    if GOOEY:
-        @ gooey.Gooey(use_cmd_args=True)
-        def setup_gui_parser(self):
-            """Set up the GUI argument parser."""
-            self.parser = gooey.GooeyParser(
-                description="Add cards to Anki from a markdown or text file."
-            )
-            path_group = self.parser.add_mutually_exclusive_group(
-                required=False
-            )
-            path_group.add_argument(
-                "-f", "--file",
-                help="Choose a file to scan.",
-                dest="file",
-                widget='FileChooser'
-            )
-            path_group.add_argument(
-                "-d", "--dir",
-                help="Choose a directory to scan.",
-                dest="directory",
-                widget='DirChooser'
-            )
-            self.setup_parser_optionals()
 
     def setup_cli_parser(self):
         """Setup the command-line argument parser."""
@@ -1314,43 +1157,6 @@ class File:
             result += "\n"
         return result
 
-    def write_ids(self):
-        """Write the identifiers to self.file."""
-        logging.info("Writing new note IDs to file," + self.filename + "...")
-        self.file = string_insert(
-            self.file, list(
-                zip(
-                    self.id_indexes, [
-                        self.id_to_str(id, comment=CONFIG_DATA["Comment"])
-                        for id in self.note_ids[:len(self.notes_to_add)]
-                        if id is not None
-                    ]
-                )
-            ) + list(
-                zip(
-                    self.inline_id_indexes, [
-                        self.id_to_str(
-                            id, inline=True,
-                            comment=CONFIG_DATA["Comment"]
-                        )
-                        for id in self.note_ids[len(self.notes_to_add):]
-                        if id is not None
-                    ]
-                )
-            )
-        )
-
-    def remove_empties(self):
-        """Remove empty notes from self.file."""
-        self.file = RegexFile.EMPTY_REGEXP.sub(
-            "", self.file
-        )
-
-    def write_file(self):
-        """Write to the actual os file"""
-        if self.file != self.original_file:
-            write_safe(self.filename, self.file)
-
     def get_add_notes(self):
         """Get the AnkiConnect-formatted request to add notes."""
         return AnkiConnect.request(
@@ -1401,13 +1207,6 @@ class File:
                 parsed.id for parsed in self.notes_to_edit
             ]
         )
-
-    def get_cards(self):
-        """Get the card IDs for all notes that need to be edited."""
-        logging.info("Getting card IDs")
-        self.cards = list()
-        for info in self.card_ids:
-            self.cards += info["cards"]
 
     def get_change_decks(self):
         """Get the AnkiConnect-formatted request to change decks."""
@@ -1586,26 +1385,6 @@ class RegexFile(File):
             self.file
         )
 
-    def write_ids(self):
-        """Write the identifiers to self.file."""
-        logging.info("Writing new note IDs to file," + self.filename + "...")
-        self.file = string_insert(
-            self.file, zip(
-                self.id_indexes, [
-                    "\n" + File.id_to_str(id, comment=CONFIG_DATA["Comment"])
-                    for id in self.note_ids
-                    if id is not None
-                ]
-            )
-        )
-        self.fix_newline_ids()
-
-    def remove_empties(self):
-        """Remove empty notes from self.file."""
-        self.file = RegexFile.EMPTY_REGEXP.sub(
-            "", self.file
-        )
-
 
 class Directory:
     """Class for managing a directory of files at a time."""
@@ -1702,23 +1481,23 @@ class Directory:
     def parse_requests_1(self, requests_1_response, tags):
         response = requests_1_response
         notes_ids = AnkiConnect.parse(response[0])
-        cards_ids = AnkiConnect.parse(response[1])
+        n_cards_already_added = 0
+        n_cards_added = 0
         for note_ids, file in zip(notes_ids, self.files):
-            file.note_ids = [
-                AnkiConnect.parse(response)
-                for response in AnkiConnect.parse(note_ids)
-            ]
-        for card_ids, file in zip(cards_ids, self.files):
-            file.card_ids = AnkiConnect.parse(card_ids)
+            file.cards = []
+            for response in AnkiConnect.parse(note_ids):
+                try:
+                    file.cards.append(AnkiConnect.parse(response))
+                    n_cards_added += 1
+                except Exception as e:
+                    if str(e) == "cannot create note because it is a duplicate":
+                        n_cards_already_added += 1
+                    else:
+                        raise
+        print(f"Successfully added: {n_cards_added} card(s)")
+        print(f"Skipped as already added: {n_cards_already_added} card(s)")
         for file in self.files:
             file.tags = tags
-        os.chdir(self.path)
-        for file in self.files:
-            file.get_cards()
-            file.write_ids()
-            logging.info("Removing empty notes for file " + file.filename)
-            file.remove_empties()
-            file.write_file()
         os.chdir(self.parent)
 
     def requests_2(self):
@@ -1775,3 +1554,4 @@ if __name__ == "__main__":
     else:
         print("Connected!")
         main()
+
