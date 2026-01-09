@@ -1,0 +1,4 @@
+# ripgrep automatically respects .gitignore; since .git/ is not typically added
+# to .gitignore, it is needed here
+.git/
+

@@ -48,7 +48,7 @@ NOTE_DICT_TEMPLATE = {
     "audio": list()
 }
 
-CONFIG_PATH = os.path.expanduser(
+CONFIG_PATH = os.environ.get("OBSIDIAN_TO_ANKI_CONFIG_PATH") or os.path.expanduser(
     os.path.join(
         os.path.dirname(os.path.realpath(__file__)),
         "obsidian_to_anki_config.ini"
@@ -56,7 +56,7 @@ CONFIG_PATH = os.path.expanduser(
 )
 CONFIG_DATA = dict()
 
-DATA_PATH = os.path.expanduser(
+DATA_PATH = os.environ.get("OBSIDIAN_TO_ANKI_DATA_PATH") or os.path.expanduser(
     os.path.join(
         os.path.dirname(os.path.realpath(__file__)),
         "obsidian_to_anki_data.json"
